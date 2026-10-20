@@ -44,14 +44,23 @@ class HealthResponse(BaseModel):
     error: str | None = None
 
 
-def create_app(config: AppConfig | None = None) -> FastAPI:
+def create_app(
+    config: AppConfig | None = None,
+    *,
+    index_on_startup: bool = True,
+) -> FastAPI:
     config = config or load_config()
     service = RagService(config)
 
     def _build_index_on_startup() -> None:
         try:
             documents, chunks = service.ensure_index()
-            logger.info("index ready documents=%s chunks=%s", documents, chunks)
+            logger.info(
+                "index ready documents=%s chunks=%s provider=%s",
+                documents,
+                chunks,
+                config.embedding_provider,
+            )
         except Exception as exc:
             service.last_error = str(exc)
             logger.error("index init failed: %s", exc)
@@ -59,7 +68,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Keep /health responsive while the first embedding pass runs.
-        if config.api_key:
+        if index_on_startup and config.api_key:
             threading.Thread(
                 target=_build_index_on_startup,
                 name="rag-index",

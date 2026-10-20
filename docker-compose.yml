@@ -10,11 +10,16 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      LOCAL_EMBED_MODEL: ${LOCAL_EMBED_MODEL:-BAAI/bge-small-zh-v1.5}
+      # Inside the container. The ONNX file is stored on the host volume below.
+      FASTEMBED_CACHE_PATH: /app/fastembed-cache
       DATA_DIR: /app/data
       STORAGE_DIR: /app/storage
     volumes:
       - ./data:/app/data:ro
       - ./storage:/app/storage
+      - ./fastembed-cache:/app/fastembed-cache
     restart: unless-stopped
     healthcheck:
       test:

@@ -4,6 +4,9 @@
 # These modular packages are the compatible newer releases.
 llama-index-core==0.14.25
 llama-index-embeddings-openai==0.7.0
+llama-index-embeddings-fastembed==0.7.0
+# ONNX runtime only. Do not install fastembed-gpu or torch for this demo.
+fastembed==0.9.0
 llama-index-llms-openai==0.8.3
 llama-index-vector-stores-chroma==0.6.0
 chromadb==1.5.9

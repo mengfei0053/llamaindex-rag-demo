@@ -20,6 +20,7 @@ from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 from app.config import AppConfig
+from app.embeddings import build_local_embed_model
 
 logger = logging.getLogger(__name__)
 # Markdown and text are read by SimpleDirectoryReader itself. The optional
@@ -94,10 +95,14 @@ class RagService:
             temperature=0.1,
             **client_kwargs,
         )
-        Settings.embed_model = OpenAIEmbedding(
-            model=self.config.embed_model,
-            **client_kwargs,
-        )
+        if self.config.embedding_provider == "local":
+            # Chat still uses the OpenAI client above. Vectors stay on-box.
+            Settings.embed_model = build_local_embed_model(self.config)
+        else:
+            Settings.embed_model = OpenAIEmbedding(
+                model=self.config.embed_model,
+                **client_kwargs,
+            )
         Settings.chunk_size = 512
         Settings.chunk_overlap = 64
 
@@ -125,9 +130,43 @@ class RagService:
                 client.delete_collection(COLLECTION_NAME)
             except Exception:
                 logger.info("No existing collection to delete")
-        return client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
+            # Metadata is applied only when creating. Opening an older index
+            # must not send a new metadata dict (Chroma rejects a mismatch).
+            return client.create_collection(
+                name=COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine", **self._embedding_identity()},
+            )
+        return client.get_or_create_collection(name=COLLECTION_NAME)
+
+    def _embedding_identity(self) -> dict[str, str]:
+        if self.config.embedding_provider == "local":
+            model = self.config.local_embed_model
+        else:
+            model = self.config.embed_model
+        return {
+            "embedding_provider": self.config.embedding_provider,
+            "embedding_model": model,
+        }
+
+    def _embedding_changed(self) -> bool:
+        """True when a previously stamped index was built with another model.
+
+        Indexes created before this stamp have neither key and are reused,
+        which is the historical OpenAI behavior.
+        """
+        try:
+            collection = self._chroma().get_collection(COLLECTION_NAME)
+        except Exception:
+            return False
+        meta = collection.metadata or {}
+        provider = meta.get("embedding_provider")
+        model = meta.get("embedding_model")
+        if not provider and not model:
+            return False
+        expected = self._embedding_identity()
+        return (
+            provider != expected["embedding_provider"]
+            or model != expected["embedding_model"]
         )
 
     def _index_from_collection(self, collection) -> VectorStoreIndex:
@@ -139,7 +178,7 @@ class RagService:
         )
 
     def ensure_index(self, *, rebuild: bool = False) -> tuple[int, int]:
-        """Load the persisted index, or build it when missing or rebuild is set.
+        """Load the persisted index, or build it when it is missing, rebuild is requested, or the stored model stamp differs.
 
         Returns ``(document_count, chunk_count)``. ``document_count`` is 0 when
         an existing index is reused without reading ``data/``.
@@ -147,7 +186,13 @@ class RagService:
         with self._lock:
             try:
                 self._configure_models()
-                if rebuild or self.chunk_count() == 0:
+                embedding_changed = self._embedding_changed()
+                if rebuild or self.chunk_count() == 0 or embedding_changed:
+                    if embedding_changed:
+                        logger.info(
+                            "embedding identity changed; rebuilding index (%s)",
+                            self._embedding_identity(),
+                        )
                     documents = self._load_documents()
                     collection = self._collection(reset=True)
                     vector_store = ChromaVectorStore(chroma_collection=collection)

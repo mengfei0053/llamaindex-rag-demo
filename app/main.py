@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -47,15 +48,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     config = config or load_config()
     service = RagService(config)
 
+    def _build_index_on_startup() -> None:
+        try:
+            documents, chunks = service.ensure_index()
+            logger.info("index ready documents=%s chunks=%s", documents, chunks)
+        except Exception as exc:
+            service.last_error = str(exc)
+            logger.error("index init failed: %s", exc)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Keep /health responsive while the first embedding pass runs.
         if config.api_key:
-            try:
-                documents, chunks = service.ensure_index()
-                logger.info("index ready documents=%s chunks=%s", documents, chunks)
-            except Exception as exc:
-                service.last_error = str(exc)
-                logger.exception("index init failed")
+            threading.Thread(
+                target=_build_index_on_startup,
+                name="rag-index",
+                daemon=True,
+            ).start()
         yield
 
     app = FastAPI(title="LlamaIndex RAG Demo", lifespan=lifespan)

@@ -22,6 +22,9 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 from app.config import AppConfig
 
 logger = logging.getLogger(__name__)
+# Markdown and text are read by SimpleDirectoryReader itself. The optional
+# llama-index-readers-file package is only needed for PDF, Office, and similar files.
+logging.getLogger("llama_index.core.readers.file.base").setLevel(logging.ERROR)
 
 COLLECTION_NAME = "company_docs"
 SNIPPET_CHARS = 1200
@@ -176,7 +179,8 @@ class RagService:
         if not question:
             raise RagError("question must not be empty", status_code=422)
         self.ensure_index(rebuild=False)
-        assert self._index is not None
+        if self._index is None:
+            raise RagError("Index is not ready", status_code=503)
         engine = self._index.as_query_engine(
             similarity_top_k=self.config.top_k,
             text_qa_template=QA_TEMPLATE,

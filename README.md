@@ -10,7 +10,7 @@
 | `POST` | `/query` | 请求体 `{"question": "..."}`，返回答案和来源片段 |
 | `POST` | `/ingest` | 清空现有索引，重新读取 `data/` 并写入 Chroma |
 
-启动时如果已经设置 `OPENAI_API_KEY`，并且 `storage/` 里还没有索引，服务会自动做一次入库。没有密钥时进程仍然可以启动，`/health` 返回 `index_ready: false`，`/query` 和 `/ingest` 返回 503。
+设置了 `OPENAI_API_KEY` 且 `storage/` 里还没有索引时，服务会在后台读取 `data/` 并建立索引。`/health` 会立刻返回；入库完成后 `index_ready` 变为 `true`。没有密钥时进程也可以启动，此时 `index_ready` 为 `false`，`/query` 和 `/ingest` 返回 503。
 
 ## 环境变量
 

@@ -15,6 +15,7 @@ from llama_index.core import (
     VectorStoreIndex,
 )
 from llama_index.core.prompts import PromptTemplate
+from llama_index.core.base.llms.types import LLMMetadata, MessageRole
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -29,6 +30,27 @@ logging.getLogger("llama_index.core.readers.file.base").setLevel(logging.ERROR)
 
 COLLECTION_NAME = "company_docs"
 SNIPPET_CHARS = 1200
+# Proxies often expose Claude/Gemini ids that llama-index OpenAI rejects
+# in metadata. Override context size so chat still goes through OpenAI API.
+DEFAULT_PROXY_CONTEXT_WINDOW = 200_000
+
+
+class ProxyChatLLM(OpenAI):
+    """OpenAI-compatible chat client that accepts non-OpenAI model ids."""
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        try:
+            return super().metadata
+        except ValueError:
+            return LLMMetadata(
+                context_window=DEFAULT_PROXY_CONTEXT_WINDOW,
+                num_output=self.max_tokens or -1,
+                is_chat_model=True,
+                is_function_calling_model=False,
+                model_name=self.model,
+                system_role=MessageRole.SYSTEM,
+            )
 
 QA_TEMPLATE = PromptTemplate(
     "Context information is below.\n"
@@ -90,7 +112,7 @@ class RagService:
         client_kwargs = {"api_key": self.config.api_key}
         if self.config.base_url:
             client_kwargs["api_base"] = self.config.base_url
-        Settings.llm = OpenAI(
+        Settings.llm = ProxyChatLLM(
             model=self.config.chat_model,
             temperature=0.1,
             **client_kwargs,
